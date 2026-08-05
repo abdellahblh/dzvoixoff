@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1120" />
+      <stop offset="100%" stop-color="#111827" />
+    </linearGradient>
+    <linearGradient id="teal" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00E5FF" />
+      <stop offset="100%" stop-color="#008B99" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  
+  <!-- Soundwaves -->
+  <path d="M128 256 v-32 a16 16 0 0 1 32 0 v64 a16 16 0 0 1 -32 0 z" fill="url(#teal)" opacity="0.4" />
+  <path d="M176 256 v-64 a16 16 0 0 1 32 0 v128 a16 16 0 0 1 -32 0 z" fill="url(#teal)" opacity="0.7" />
+  <path d="M352 256 v-32 a16 16 0 0 1 32 0 v64 a16 16 0 0 1 -32 0 z" fill="url(#teal)" opacity="0.4" />
+  <path d="M304 256 v-64 a16 16 0 0 1 32 0 v128 a16 16 0 0 1 -32 0 z" fill="url(#teal)" opacity="0.7" />
+
+  <!-- Microphone -->
+  <rect x="232" y="128" width="48" height="144" rx="24" fill="white" />
+  
+  <!-- Mic Stand curve -->
+  <path d="M184 240 v32 c0 40 32 72 72 72 s72 -32 72 -72 v-32" fill="none" stroke="white" stroke-width="24" stroke-linecap="round" />
+  
+  <!-- Mic Stand base -->
+  <path d="M256 344 v64" fill="none" stroke="white" stroke-width="24" stroke-linecap="round" />
+  <path d="M208 408 h96" fill="none" stroke="white" stroke-width="24" stroke-linecap="round" />
+</svg>

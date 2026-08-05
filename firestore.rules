@@ -1,0 +1,197 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches auth.uid)
+    // Fields:
+    //   - uid: string (required, immutable) - User's Firebase Auth UID
+    //   - name: string (required) - User's display name
+    //   - email: string (required, immutable) - User's email address
+    //   - avatar: string (optional) - URL to user's avatar
+    //   - generationsUsed: number (required) - Number of generations used
+    //   - plan: string (required) - User's subscription plan ('free' or 'pro')
+    //   - createdAt: timestamp (required, immutable) - When the profile was created
+    //
+    // Collection: generations
+    // Document ID: {generationId} (auto-generated)
+    // Fields:
+    //   - userId: string (required, immutable) - UID of the user who generated this
+    //   - date: timestamp (required, immutable) - When the generation was created
+    //   - script: string (required, immutable) - The text script used
+    //   - audioUrl: string (required, immutable) - The base64 audio data or URL
+    //   - voice: string (required, immutable) - The voice used
+    //
+    // Collection: payment_proofs
+    // Document ID: {proofId} (auto-generated)
+    // Fields:
+    //   - userId: string (required, immutable)
+    //   - userEmail: string (required, immutable)
+    //   - userName: string (required, immutable)
+    //   - fileData: string (required, immutable) - base64 image data
+    //   - status: string (required) - 'pending', 'approved', 'rejected'
+    //   - createdAt: timestamp (required, immutable)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    // Check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Check if user owns the resource (for user-owned documents)
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Check if user is owner based on document's userId field
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    // Check if the user is an admin
+    function isAdmin() {
+      return isAuthenticated() && 
+             (request.auth.token.email == "abdellah.bellahcene2004@gmail.com" || 
+              get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+    }
+    
+    // Validate required fields exist
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+    
+    // Validate that the document contains only the allowed fields
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+    
+    // Validate email format
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    
+    function isValidUser(data) {
+      return hasRequiredFields(['uid', 'name', 'email', 'generationsUsed', 'plan', 'createdAt']) &&
+             hasOnlyAllowedFields(['uid', 'name', 'email', 'avatar', 'generationsUsed', 'plan', 'createdAt']) &&
+             data.uid is string && (data.uid == request.auth.uid || isAdmin()) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             isValidEmail(data.email) &&
+             (!('avatar' in data) || (data.avatar is string && data.avatar.size() < 1000)) &&
+             data.generationsUsed is number && data.generationsUsed >= 0 &&
+             data.plan in ['free', 'pro'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidGeneration(data) {
+      return hasRequiredFields(['userId', 'date', 'script', 'audioUrl', 'voice']) &&
+             hasOnlyAllowedFields(['userId', 'date', 'script', 'audioUrl', 'voice']) &&
+             data.userId is string && (data.userId == request.auth.uid || isAdmin()) &&
+             data.date is timestamp &&
+             data.script is string && data.script.size() > 0 && data.script.size() < 5000 &&
+             data.audioUrl is string && data.audioUrl.size() < 1048576 && // Max 1MB for base64 audio
+             data.voice is string && data.voice.size() > 0 && data.voice.size() < 50;
+    }
+
+    function isValidPaymentProof(data) {
+      return hasRequiredFields(['userId', 'userEmail', 'userName', 'fileData', 'status', 'createdAt']) &&
+             hasOnlyAllowedFields(['userId', 'userEmail', 'userName', 'fileData', 'status', 'createdAt']) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.userEmail is string &&
+             data.userName is string &&
+             data.fileData is string && data.fileData.size() < 1048576 && // Max 1MB
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+    
+    match /users/{userId} {
+      // Users can only read their own profile, admins can read all
+      // We use a direct check for request.auth.uid to be safe
+      allow read: if (isAuthenticated() && request.auth.uid == userId) || isAdmin();
+      
+      // Users can create their own profile. They must start with 0 generations and a 'free' plan.
+      allow create: if isOwner(userId) && 
+                       isValidUser(request.resource.data) &&
+                       request.resource.data.generationsUsed == 0 &&
+                       request.resource.data.plan == 'free';
+                       
+      // Users can update their own profile.
+      // They cannot change their uid, email, or createdAt.
+      // They can only increment their generationsUsed by 1 at a time.
+      // They can upgrade their plan to 'pro'.
+      // Admins can update any user's plan.
+      allow update: if (isOwner(userId) && 
+                       isValidUser(request.resource.data) &&
+                       request.resource.data.uid == resource.data.uid &&
+                       request.resource.data.email == resource.data.email &&
+                       request.resource.data.createdAt == resource.data.createdAt &&
+                       (
+                         // Allow updating name/avatar
+                         (request.resource.data.generationsUsed == resource.data.generationsUsed &&
+                          request.resource.data.plan == resource.data.plan) ||
+                         // Allow incrementing usage
+                         (request.resource.data.generationsUsed == resource.data.generationsUsed + 1 &&
+                          request.resource.data.plan == resource.data.plan) ||
+                         // Allow upgrading plan
+                         (request.resource.data.plan == 'pro' &&
+                          request.resource.data.generationsUsed == resource.data.generationsUsed)
+                       )) || (isAdmin() && isValidUser(request.resource.data));
+                       
+      allow delete: if false; // Users cannot delete their profile directly
+    }
+
+    match /generations/{generationId} {
+      // Users can only read their own generations, admins can read all
+      allow read: if isDocOwner() || isAdmin();
+      
+      // Users can create a generation if they are the owner
+      allow create: if isAuthenticated() && 
+                       isValidGeneration(request.resource.data) &&
+                       request.resource.data.userId == request.auth.uid;
+                       
+      // Generations are immutable, they cannot be updated
+      allow update: if false;
+      
+      // Users can delete their own generations
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /payment_proofs/{proofId} {
+      // Users can read their own proofs, admins can read all
+      allow read: if isDocOwner() || isAdmin();
+      
+      // Users can create a proof if they are the owner and status is pending
+      allow create: if isAuthenticated() && 
+                       isValidPaymentProof(request.resource.data) &&
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.status == 'pending';
+                       
+      // Only admins can update the status
+      allow update: if isAdmin() && 
+                       request.resource.data.userId == resource.data.userId &&
+                       request.resource.data.userEmail == resource.data.userEmail &&
+                       request.resource.data.userName == resource.data.userName &&
+                       request.resource.data.fileData == resource.data.fileData &&
+                       request.resource.data.createdAt == resource.data.createdAt &&
+                       request.resource.data.status in ['pending', 'approved', 'rejected'];
+      
+      // Only admins can delete
+      allow delete: if isAdmin();
+    }
+  }
+}
